@@ -1,6 +1,6 @@
 [package]
 name = "mongrel-macros"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Proc-macro crate for Mongrel — derive macros for Schema and Model"
 license = "MIT"

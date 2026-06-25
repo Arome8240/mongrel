@@ -7,7 +7,7 @@ license = "MIT"
 repository = "https://github.com/Arome8240/mongrel"
 keywords = ["mongodb", "orm", "odm", "mongoose", "async"]
 categories = ["database", "asynchronous"]
-readme = "../README.md"
+readme = "README.md"
 
 [dependencies]
 mongrel-macros = { version = "0.1.0", path = "../mongrel-macros" }

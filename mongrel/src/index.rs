@@ -1,10 +1,11 @@
 use bson::Document;
 use mongodb::{options::IndexOptions, IndexModel};
 
-// ── IndexDef ──────────────────────────────────────────────────────────────────
-// A description of a single index. Build one with IndexBuilder, then pass a
-// slice of IndexDef to Model::create_indexes().
-
+/// A fully-described MongoDB index, produced by [`IndexBuilder::build`].
+///
+/// Pass a `Vec<IndexDef>` from [`MongooseIndexes::indexes`] to have
+/// [`Model::ensure_custom_indexes`](crate::model::Model::ensure_custom_indexes)
+/// create them at startup.
 #[derive(Debug, Clone)]
 pub struct IndexDef {
     pub keys: Document,
@@ -15,8 +16,31 @@ pub struct IndexDef {
     pub partial_filter: Option<Document>,
 }
 
-// ── IndexBuilder ──────────────────────────────────────────────────────────────
-
+/// Fluent builder for [`IndexDef`].
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Compound unique index
+/// IndexBuilder::new()
+///     .field("email")
+///     .unique()
+///     .build();
+///
+/// // TTL index — expire sessions after 1 hour
+/// IndexBuilder::new()
+///     .field("created_at")
+///     .ttl(3600)
+///     .name("session_ttl")
+///     .build();
+///
+/// // Full-text search across multiple fields
+/// IndexBuilder::new()
+///     .text("title")
+///     .text("body")
+///     .name("post_text_search")
+///     .build();
+/// ```
 pub struct IndexBuilder {
     keys: Document,
     unique: bool,
@@ -56,11 +80,13 @@ impl IndexBuilder {
         self
     }
 
+    /// Enforce uniqueness — no two documents may share the same key value(s).
     pub fn unique(mut self) -> Self {
         self.unique = true;
         self
     }
 
+    /// Only index documents where the key field(s) exist.
     pub fn sparse(mut self) -> Self {
         self.sparse = true;
         self
@@ -72,16 +98,21 @@ impl IndexBuilder {
         self
     }
 
+    /// Give the index a custom name (shown in MongoDB shell / Atlas).
     pub fn name(mut self, name: impl Into<String>) -> Self {
         self.name = Some(name.into());
         self
     }
 
+    /// Only index documents matching `filter` — a partial index.
+    /// Reduces index size and write overhead when only a subset of documents
+    /// need to be indexed (e.g., only active users).
     pub fn partial_filter(mut self, filter: Document) -> Self {
         self.partial_filter = Some(filter);
         self
     }
 
+    /// Finalise the builder and return an [`IndexDef`].
     pub fn build(self) -> IndexDef {
         IndexDef {
             keys: self.keys,
@@ -118,9 +149,26 @@ pub(crate) fn def_to_model(def: &IndexDef) -> IndexModel {
         .build()
 }
 
-// ── MongooseIndexes trait ─────────────────────────────────────────────────────
-// Implement this on your schema to declare extra indexes beyond `unique_fields`.
-
+/// Declare compound, sparse, TTL, text, or partial indexes on a schema type.
+///
+/// Implement this on your struct and call
+/// [`Model::ensure_custom_indexes`](crate::model::Model::ensure_custom_indexes)
+/// at startup. Fields marked `#[field(unique)]` are handled separately by
+/// [`Model::ensure_indexes`](crate::model::Model::ensure_indexes).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// impl MongooseIndexes for User {
+///     fn indexes() -> Vec<IndexDef> {
+///         vec![
+///             IndexBuilder::new().field("last_name").field("first_name").build(),
+///             IndexBuilder::new().field("phone").sparse().build(),
+///         ]
+///     }
+/// }
+/// ```
 pub trait MongooseIndexes {
+    /// Return the list of custom indexes to create for this collection.
     fn indexes() -> Vec<IndexDef> { vec![] }
 }

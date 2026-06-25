@@ -6,16 +6,23 @@ use serde::{de::DeserializeOwned, Serialize};
 use crate::error::Result;
 use crate::schema::MongooseSchema;
 
-// ── PaginatedResult<T> ────────────────────────────────────────────────────────
-
+/// The result of a paginated query, returned by
+/// [`PaginateBuilder::exec`].
 #[derive(Debug)]
 pub struct PaginatedResult<T> {
+    /// Documents for the requested page.
     pub docs: Vec<T>,
+    /// Total number of documents matching the filter (across all pages).
     pub total: u64,
+    /// Current page number (1-based).
     pub page: u64,
+    /// Maximum documents per page as requested.
     pub per_page: u64,
+    /// `ceil(total / per_page)`.
     pub total_pages: u64,
+    /// `true` when there is a page after this one.
     pub has_next: bool,
+    /// `true` when there is a page before this one.
     pub has_prev: bool,
 }
 
@@ -38,8 +45,21 @@ impl<T> PaginatedResult<T> {
     }
 }
 
-// ── PaginateBuilder ───────────────────────────────────────────────────────────
-
+/// Chainable builder for paginated queries, returned by
+/// [`Model::paginate`](crate::model::Model::paginate).
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let result = users
+///     .paginate(2, 10)
+///     .filter(doc! { "active": true })
+///     .sort(doc! { "name": 1 })
+///     .exec()
+///     .await?;
+///
+/// println!("{}/{} pages", result.page, result.total_pages);
+/// ```
 pub struct PaginateBuilder<T: Send + Sync> {
     collection: mongodb::Collection<T>,
     filter: Document,

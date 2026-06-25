@@ -8,15 +8,31 @@ use crate::error::Result;
 use crate::schema::MongooseSchema;
 use futures_util::TryStreamExt;
 
-// ── Sort direction ────────────────────────────────────────────────────────────
-
+/// Sort direction for [`QueryBuilder::sort`].
 pub enum SortDir {
+    /// Ascending order (1).
     Asc,
+    /// Descending order (-1).
     Desc,
 }
 
-// ── QueryBuilder ──────────────────────────────────────────────────────────────
-
+/// Chainable query builder returned by [`Model::find`](crate::model::Model::find).
+///
+/// Build up a filter with comparison operators, add sort/limit/skip/projection,
+/// then call one of the terminal methods to execute.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// let results = users
+///     .find()
+///     .where_field("age").gte(18)
+///     .where_field("role").eq("admin")
+///     .sort("name", SortDir::Asc)
+///     .limit(20)
+///     .exec()
+///     .await?;
+/// ```
 pub struct QueryBuilder<T: Send + Sync> {
     collection: Arc<mongodb::Collection<T>>,
     filter: Document,
@@ -50,6 +66,8 @@ where
 
     // ── Field selection ───────────────────────────────────────────────────────
 
+    /// Start a condition on `field`. Chain with a comparison operator:
+    /// `.where_field("age").gte(18)`.
     pub fn where_field(mut self, field: impl Into<String>) -> Self {
         self.pending_field = Some(field.into());
         self
@@ -64,6 +82,7 @@ where
         self
     }
 
+    /// Field equals `value` exactly (`{ field: value }`).
     pub fn eq(mut self, value: impl Into<Bson>) -> Self {
         if let Some(field) = self.pending_field.take() {
             self.filter.insert(field, value.into());
@@ -71,12 +90,18 @@ where
         self
     }
 
+    /// Field is not equal to `value` (`$ne`).
     pub fn ne(self, value: impl Into<Bson>) -> Self { self.add_condition("$ne", value) }
+    /// Field is strictly greater than `value` (`$gt`).
     pub fn gt(self, value: impl Into<Bson>) -> Self { self.add_condition("$gt", value) }
+    /// Field is greater than or equal to `value` (`$gte`).
     pub fn gte(self, value: impl Into<Bson>) -> Self { self.add_condition("$gte", value) }
+    /// Field is strictly less than `value` (`$lt`).
     pub fn lt(self, value: impl Into<Bson>) -> Self { self.add_condition("$lt", value) }
+    /// Field is less than or equal to `value` (`$lte`).
     pub fn lte(self, value: impl Into<Bson>) -> Self { self.add_condition("$lte", value) }
 
+    /// Field value is one of the given `values` (`$in`).
     pub fn in_list(mut self, values: impl IntoIterator<Item = impl Into<Bson>>) -> Self {
         if let Some(field) = self.pending_field.take() {
             let arr: Vec<Bson> = values.into_iter().map(Into::into).collect();
@@ -85,6 +110,7 @@ where
         self
     }
 
+    /// Field value is **not** in the given list (`$nin`).
     pub fn nin(mut self, values: impl IntoIterator<Item = impl Into<Bson>>) -> Self {
         if let Some(field) = self.pending_field.take() {
             let arr: Vec<Bson> = values.into_iter().map(Into::into).collect();
@@ -93,6 +119,9 @@ where
         self
     }
 
+    /// Field matches a PCRE regular expression (`$regex`).
+    /// `flags` is a string of regex option letters, e.g. `"i"` for
+    /// case-insensitive.
     pub fn regex(mut self, pattern: impl Into<String>, flags: impl Into<String>) -> Self {
         if let Some(field) = self.pending_field.take() {
             self.filter.insert(
@@ -103,6 +132,8 @@ where
         self
     }
 
+    /// Filter by field existence (`$exists`). Pass `true` to match documents
+    /// where the field exists; `false` for documents where it is absent.
     pub fn field_exists(mut self, should_exist: bool) -> Self {
         if let Some(field) = self.pending_field.take() {
             self.filter.insert(field, doc! { "$exists": should_exist });
@@ -112,16 +143,20 @@ where
 
     // ── Chainable query options ───────────────────────────────────────────────
 
+    /// Maximum number of documents to return.
     pub fn limit(mut self, n: i64) -> Self {
         self.limit = Some(n);
         self
     }
 
+    /// Number of documents to skip before returning results (for manual pagination).
+    /// Prefer [`Model::paginate`](crate::model::Model::paginate) for page-based access.
     pub fn skip(mut self, n: u64) -> Self {
         self.skip = Some(n);
         self
     }
 
+    /// Add a sort key. Call multiple times for multi-key sorts.
     pub fn sort(mut self, field: impl Into<String>, dir: SortDir) -> Self {
         let order: i32 = match dir {
             SortDir::Asc => 1,
@@ -133,6 +168,8 @@ where
         self
     }
 
+    /// Restrict which fields are returned (inclusion projection).
+    /// Only the listed fields (plus `_id`) will be present in each document.
     pub fn select(mut self, fields: impl IntoIterator<Item = impl Into<String>>) -> Self {
         let mut proj = Document::new();
         for f in fields {
@@ -142,8 +179,9 @@ where
         self
     }
 
-    // ── Raw filter escape hatch ───────────────────────────────────────────────
-
+    /// Replace the entire filter with a raw BSON `Document`.
+    /// Use this escape hatch for operators not covered by the typed methods
+    /// (e.g. `$or`, `$and`, `$elemMatch`).
     pub fn filter(mut self, raw: Document) -> Self {
         self.filter = raw;
         self
@@ -151,6 +189,7 @@ where
 
     // ── Terminal operations ───────────────────────────────────────────────────
 
+    /// Execute and return all matching documents deserialized into `T`.
     pub async fn exec(self) -> Result<Vec<T>> {
         let mut opts = FindOptions::default();
         opts.sort = self.sort;
@@ -171,6 +210,7 @@ where
         Ok(results)
     }
 
+    /// Execute and return the first matching document, or `None`.
     pub async fn exec_one(self) -> Result<Option<T>> {
         let mut opts = FindOneOptions::default();
         opts.sort = self.sort;
@@ -184,6 +224,7 @@ where
         Ok(result)
     }
 
+    /// Return the number of documents matching the current filter.
     pub async fn count(self) -> Result<u64> {
         let n = self
             .collection
@@ -192,12 +233,15 @@ where
         Ok(n)
     }
 
+    /// Return `true` if at least one document matches the filter.
     pub async fn any(self) -> Result<bool> {
         Ok(self.count().await? > 0)
     }
 
-    // ── Lean: returns raw Documents instead of deserializing ──────────────────
-
+    /// Execute and return raw BSON [`Document`]s — skips deserialization into `T`.
+    ///
+    /// Useful for performance-critical reads where you only need a subset of
+    /// fields, or where the shape doesn't fit `T`.
     pub async fn lean(self) -> Result<Vec<Document>> {
         let raw_col = self.collection.clone_with_type::<Document>();
 
@@ -215,6 +259,7 @@ where
         Ok(results)
     }
 
+    /// Like [`lean`](Self::lean) but returns only the first matching document.
     pub async fn lean_one(self) -> Result<Option<Document>> {
         let raw_col = self.collection.clone_with_type::<Document>();
 

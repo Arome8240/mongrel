@@ -16,8 +16,19 @@ use crate::{
 
 pub use crate::query::SortDir;
 
-// ── Model<T> ─────────────────────────────────────────────────────────────────
-
+/// The primary interface for interacting with a MongoDB collection.
+///
+/// `Model<T>` is generic over a schema type `T` that implements
+/// [`MongooseSchema`], [`Hooks`], `Serialize`, and `DeserializeOwned`.
+///
+/// You don't construct `Model<T>` directly — `#[derive(Model)]` generates a
+/// `{Name}Model` wrapper around it:
+///
+/// ```rust,ignore
+/// let users = UserModel::new(Arc::clone(&db));
+/// ```
+///
+/// All async methods return [`Result<_>`](crate::error::Result).
 pub struct Model<T> {
     db: Arc<mongodb::Database>,
     _marker: std::marker::PhantomData<T>,
@@ -44,6 +55,14 @@ where
 
     // ── Create ────────────────────────────────────────────────────────────────
 
+    /// Insert a new document into the collection.
+    ///
+    /// Runs the full lifecycle:
+    /// `pre_validate → validate → post_validate → pre_save → INSERT → post_save`.
+    /// If `#[schema(timestamps)]` is set, `created_at` and `updated_at` are
+    /// injected automatically.
+    ///
+    /// Returns the saved document as read back from MongoDB (with its `_id` set).
     pub async fn create(&self, mut doc: T) -> Result<T> {
         doc.pre_validate().await?;
         doc.validate()?;
@@ -76,18 +95,24 @@ where
 
     // ── Find ──────────────────────────────────────────────────────────────────
 
+    /// Start a chainable [`QueryBuilder`] with no initial filter.
     pub fn find(&self) -> QueryBuilder<T> {
         QueryBuilder::new(self.col())
     }
 
+    /// Start a [`QueryBuilder`] pre-seeded with a raw BSON filter document.
     pub fn find_many(&self, filter: Document) -> QueryBuilder<T> {
         QueryBuilder::new(self.col()).filter(filter)
     }
 
+    /// Start a [`QueryBuilder`] pre-seeded with a raw BSON filter, intended
+    /// for single-document lookups. Call `.exec_one()` to terminate.
     pub fn find_one_where(&self, filter: Document) -> QueryBuilder<T> {
         QueryBuilder::new(self.col()).filter(filter)
     }
 
+    /// Find a single document by its string-encoded ObjectId.
+    /// Returns `Ok(None)` if no document with that id exists.
     pub async fn find_by_id(&self, id: &str) -> Result<Option<T>> {
         let oid = parse_oid(id)?;
         Ok(self.col().find_one(doc! { "_id": oid }).await?)
@@ -95,6 +120,8 @@ where
 
     // ── Update ────────────────────────────────────────────────────────────────
 
+    /// Find a document by id, apply `update`, and return the updated document.
+    /// Returns `Ok(None)` if the id did not match any document.
     pub async fn find_by_id_and_update(
         &self,
         id: &str,
@@ -104,6 +131,9 @@ where
         self.find_one_and_update(doc! { "_id": oid }, update).await
     }
 
+    /// Find the first document matching `filter`, apply `update`, and return
+    /// the document **after** the update (`ReturnDocument::After`).
+    /// Automatically stamps `updated_at` when timestamps are enabled.
     pub async fn find_one_and_update(
         &self,
         filter: Document,
@@ -129,6 +159,8 @@ where
             .await?)
     }
 
+    /// Apply `update` to every document matching `filter`.
+    /// Returns the number of documents modified.
     pub async fn update_many(&self, filter: Document, update: Document) -> Result<u64> {
         let res = self.col().update_many(filter, update).await?;
         Ok(res.modified_count)
@@ -136,15 +168,19 @@ where
 
     // ── Delete ────────────────────────────────────────────────────────────────
 
+    /// Delete the document with the given id and return it. Returns `Ok(None)`
+    /// if no document matched.
     pub async fn find_by_id_and_delete(&self, id: &str) -> Result<Option<T>> {
         let oid = parse_oid(id)?;
         self.find_one_and_delete(doc! { "_id": oid }).await
     }
 
+    /// Delete the first document matching `filter` and return it.
     pub async fn find_one_and_delete(&self, filter: Document) -> Result<Option<T>> {
         Ok(self.col().find_one_and_delete(filter).await?)
     }
 
+    /// Delete all documents matching `filter`. Returns the deleted count.
     pub async fn delete_many(&self, filter: Document) -> Result<u64> {
         let res = self.col().delete_many(filter).await?;
         Ok(res.deleted_count)
@@ -152,6 +188,8 @@ where
 
     // ── Upsert ────────────────────────────────────────────────────────────────
 
+    /// Update the first document matching `filter`, or insert a new one if none
+    /// exists (`upsert: true`). Returns the document after the operation.
     pub async fn find_one_and_upsert(&self, filter: Document, update: Document) -> Result<T> {
         let opts = FindOneAndUpdateOptions::builder()
             .upsert(true)
@@ -167,18 +205,33 @@ where
 
     // ── Count ─────────────────────────────────────────────────────────────────
 
+    /// Count documents matching `filter`. Pass `doc! {}` to count the entire
+    /// collection.
     pub async fn count_documents(&self, filter: Document) -> Result<u64> {
         Ok(self.col().count_documents(filter).await?)
     }
 
     // ── Pagination ────────────────────────────────────────────────────────────
 
+    /// Create a [`PaginateBuilder`] for page-based access. Pages are 1-based.
+    ///
+    /// ```rust,ignore
+    /// let page = users.paginate(1, 20).filter(doc! { "active": true }).exec().await?;
+    /// ```
     pub fn paginate(&self, page: u64, per_page: u64) -> PaginateBuilder<T> {
         PaginateBuilder::new((*self.col()).clone(), page, per_page)
     }
 
     // ── Aggregation ───────────────────────────────────────────────────────────
 
+    /// Start a fluent [`AggregationPipeline`] for this collection.
+    ///
+    /// ```rust,ignore
+    /// let results = users.aggregate()
+    ///     .match_stage(doc! { "active": true })
+    ///     .group(doc! { "_id": "$role", "count": { "$sum": 1 } })
+    ///     .exec_raw().await?;
+    /// ```
     pub fn aggregate(&self) -> AggregationPipeline<T> {
         AggregationPipeline::new((*self.col()).clone())
     }

@@ -2,6 +2,11 @@
 name = "mongrel-macros"
 version = "0.1.0"
 edition = "2024"
+description = "Proc-macro crate for Mongrel — derive macros for Schema and Model"
+license = "MIT"
+repository = "https://github.com/Arome8240/mongrel"
+keywords = ["mongodb", "orm", "odm", "async", "derive"]
+categories = ["database", "asynchronous"]
 
 [lib]
 proc-macro = true

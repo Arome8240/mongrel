@@ -2,9 +2,15 @@
 name = "mongrel"
 version = "0.1.0"
 edition = "2024"
+description = "A Mongoose-style MongoDB ODM for Rust — schemas, CRUD, hooks, population, aggregation, pagination, and more"
+license = "MIT"
+repository = "https://github.com/Arome8240/mongrel"
+keywords = ["mongodb", "orm", "odm", "mongoose", "async"]
+categories = ["database", "asynchronous"]
+readme = "../README.md"
 
 [dependencies]
-mongrel-macros = { path = "../mongrel-macros" }
+mongrel-macros = { version = "0.1.0", path = "../mongrel-macros" }
 mongodb = { version = "3" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
